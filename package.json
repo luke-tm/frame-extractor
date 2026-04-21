@@ -1,0 +1,24 @@
+{
+  "name": "frame-extractor",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview",
+    "build:sw": "esbuild src/sw/sw.ts --bundle --outfile=public/sw.js --format=esm --target=es2022",
+    "build:full": "npm run build && npm run build:sw"
+  },
+  "devDependencies": {
+    "@types/node": "^25.6.0",
+    "esbuild": "^0.28.0",
+    "typescript": "~6.0.2",
+    "vite": "^8.0.4"
+  },
+  "dependencies": {
+    "gifuct-js": "^2.1.2",
+    "jszip": "^3.10.1",
+    "mp4box": "^2.3.0"
+  }
+}

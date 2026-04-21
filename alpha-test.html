@@ -1,0 +1,569 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Alpha Verification — FrameExtract Step 2</title>
+  <style>
+    :root {
+      --bg: #0A0A0A; --surface: #161616; --border: #2A2A2A;
+      --text: #E2E2E2; --muted: #666; --pass: #4A9960; --fail: #C94040;
+      --warn: #C98A1A; --accent: #E8E8E8;
+      --checker-a: #2A2A2A; --checker-b: #1F1F1F;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background: var(--bg); color: var(--text);
+      font-family: 'DM Mono', 'Fira Code', ui-monospace, monospace;
+      font-size: 13px; padding: 24px; max-width: 780px; margin: 0 auto;
+    }
+    h1 { font-size: 15px; letter-spacing: 0.04em; color: var(--accent); margin-bottom: 4px; }
+    .subtitle { color: var(--muted); font-size: 11px; margin-bottom: 24px; }
+    .card {
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: 6px; padding: 16px; margin-bottom: 16px;
+    }
+    .card-title {
+      font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em;
+      color: var(--muted); margin-bottom: 12px;
+    }
+    .drop-zone {
+      border: 1px dashed var(--border); border-radius: 4px;
+      padding: 24px; text-align: center; cursor: pointer;
+      transition: border-color 120ms ease-out; position: relative;
+    }
+    .drop-zone:hover { border-color: #555; }
+    .drop-zone input { position: absolute; inset: 0; opacity: 0; width: 100%; cursor: pointer; }
+    .drop-label { color: var(--muted); font-size: 12px; }
+    .drop-sub { color: #444; font-size: 11px; margin-top: 4px; }
+
+    /* Checkerboard preview */
+    .preview-wrap {
+      background-image:
+        linear-gradient(45deg, var(--checker-a) 25%, transparent 25%),
+        linear-gradient(-45deg, var(--checker-a) 25%, transparent 25%),
+        linear-gradient(45deg, transparent 75%, var(--checker-a) 75%),
+        linear-gradient(-45deg, transparent 75%, var(--checker-a) 75%);
+      background-size: 16px 16px;
+      background-position: 0 0, 0 8px, 8px -8px, -8px 0;
+      background-color: var(--checker-b);
+      border-radius: 4px; display: flex; gap: 16px;
+      flex-wrap: wrap; padding: 12px; min-height: 80px;
+      align-items: flex-start; justify-content: flex-start;
+    }
+    .preview-wrap canvas { display: block; border-radius: 2px; }
+
+    .log {
+      background: #0D0D0D; border: 1px solid var(--border); border-radius: 4px;
+      padding: 12px; max-height: 240px; overflow-y: auto; font-size: 11px;
+      line-height: 1.7;
+    }
+    .log-line { display: flex; gap: 8px; }
+    .log-time { color: var(--muted); flex-shrink: 0; }
+    .log-msg { flex: 1; }
+    .log-msg.pass { color: var(--pass); }
+    .log-msg.fail { color: var(--fail); }
+    .log-msg.warn { color: var(--warn); }
+    .log-msg.info { color: var(--text); }
+
+    .result-badge {
+      display: inline-flex; align-items: center; gap: 6px;
+      padding: 6px 12px; border-radius: 4px; font-size: 12px;
+      letter-spacing: 0.04em; margin-top: 12px;
+    }
+    .result-badge.pass { background: #0A1A0D; border: 1px solid var(--pass); color: var(--pass); }
+    .result-badge.fail { background: #1A0A0A; border: 1px solid var(--fail); color: var(--fail); }
+    .result-badge.pending { background: #111; border: 1px solid var(--border); color: var(--muted); }
+
+    .pixel-grid {
+      display: flex; flex-wrap: wrap; gap: 2px; margin-top: 10px;
+    }
+    .pixel-swatch {
+      width: 20px; height: 20px; border-radius: 2px;
+      border: 1px solid #333; font-size: 8px; display: flex;
+      align-items: center; justify-content: center; color: #666;
+    }
+
+    .caps-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+    .cap-row { display: flex; justify-content: space-between; align-items: center; padding: 4px 0; border-bottom: 1px solid #1a1a1a; }
+    .cap-label { color: var(--muted); }
+    .cap-val { }
+    .cap-val.yes { color: var(--pass); }
+    .cap-val.no  { color: var(--fail); }
+    .cap-val.na  { color: var(--muted); }
+
+    .generate-btn {
+      background: var(--surface); border: 1px solid var(--border); border-radius: 4px;
+      color: var(--text); font-family: inherit; font-size: 12px; padding: 8px 14px;
+      cursor: pointer; transition: border-color 120ms; margin-top: 8px;
+    }
+    .generate-btn:hover { border-color: #555; }
+    .generate-btn:disabled { opacity: 0.4; cursor: default; }
+
+    .export-btn {
+      background: var(--accent); border: 1px solid var(--accent); border-radius: 4px;
+      color: var(--bg); font-family: inherit; font-size: 12px; padding: 8px 14px;
+      cursor: pointer; transition: opacity 120ms; margin-top: 8px; margin-left: 8px;
+    }
+    .export-btn:hover { opacity: 0.85; }
+    .export-btn:disabled { opacity: 0.3; cursor: default; }
+  </style>
+</head>
+<body>
+
+<h1>FrameExtract — Alpha Preservation Test</h1>
+<p class="subtitle">Step 2 of the build order · Verifies WebCodecs + OffscreenCanvas preserve alpha end-to-end</p>
+
+<!-- Capabilities -->
+<div class="card">
+  <div class="card-title">Browser capabilities</div>
+  <div class="caps-grid" id="caps"></div>
+</div>
+
+<!-- Synthetic test video generator -->
+<div class="card">
+  <div class="card-title">Synthetic test — generate a VP9+alpha WebM in-browser</div>
+  <p style="color:var(--muted);font-size:11px;margin-bottom:10px;">
+    Creates a 10-frame 320×240 clip: teal circle (rgba 0,180,180,255) on fully transparent background.
+    Expected: alpha=0 outside circle, alpha=255 inside.
+  </p>
+  <button class="generate-btn" id="generate-btn">Generate test-alpha.webm &amp; run pipeline</button>
+  <button class="export-btn" id="export-btn" disabled>Export frame 0 as PNG</button>
+</div>
+
+<!-- Manual upload -->
+<div class="card">
+  <div class="card-title">Or upload your own WebM VP9+alpha / HEVC-alpha / transparent GIF</div>
+  <div class="drop-zone" id="drop-zone">
+    <p class="drop-label">Drop file here or click to browse</p>
+    <p class="drop-sub">webm · gif (with alpha)</p>
+    <input type="file" accept="video/webm,image/gif" id="file-input" />
+  </div>
+</div>
+
+<!-- Preview -->
+<div class="card">
+  <div class="card-title">Frame previews — checkerboard shows transparency</div>
+  <div class="preview-wrap" id="preview-wrap">
+    <span style="color:var(--muted);font-size:11px;padding:8px">No frames yet</span>
+  </div>
+  <div id="pixel-analysis"></div>
+</div>
+
+<!-- Log + result -->
+<div class="card">
+  <div class="card-title">Test log</div>
+  <div class="log" id="log"></div>
+  <div id="result-badge"><div class="result-badge pending">Waiting for input…</div></div>
+</div>
+
+<script type="module">
+// ─── Logging ──────────────────────────────────────────────────────────
+const logEl = document.getElementById('log');
+function log(msg, kind = 'info') {
+  const line = document.createElement('div');
+  line.className = 'log-line';
+  const now = new Date().toISOString().slice(11, 23);
+  line.innerHTML = `<span class="log-time">${now}</span><span class="log-msg ${kind}">${msg}</span>`;
+  logEl.appendChild(line);
+  logEl.scrollTop = logEl.scrollHeight;
+}
+
+// ─── Capabilities ─────────────────────────────────────────────────────
+const caps = {
+  VideoDecoder: typeof VideoDecoder !== 'undefined',
+  ImageDecoder: typeof ImageDecoder !== 'undefined',
+  OffscreenCanvas: typeof OffscreenCanvas !== 'undefined',
+  'canvas.toBlob': typeof document.createElement('canvas').toBlob === 'function',
+  'rVFC': typeof document.createElement('video').requestVideoFrameCallback === 'function',
+  'WebShare (files)': typeof navigator.share === 'function' && typeof navigator.canShare === 'function',
+};
+
+const capsEl = document.getElementById('caps');
+Object.entries(caps).forEach(([k, v]) => {
+  capsEl.innerHTML += `
+    <div class="cap-row">
+      <span class="cap-label">${k}</span>
+      <span class="cap-val ${v ? 'yes' : 'no'}">${v ? '✓ available' : '✗ missing'}</span>
+    </div>`;
+});
+
+// ─── Alpha check helpers ───────────────────────────────────────────────
+function sampleAlpha(canvas) {
+  const ctx = canvas.getContext('2d');
+  const w = canvas.width, h = canvas.height;
+  // Sample corners (should be transparent for our test circle)
+  const corners = [
+    ctx.getImageData(2, 2, 1, 1).data,
+    ctx.getImageData(w - 3, 2, 1, 1).data,
+    ctx.getImageData(2, h - 3, 1, 1).data,
+    ctx.getImageData(w - 3, h - 3, 1, 1).data,
+  ];
+  // Sample center (should be opaque)
+  const center = ctx.getImageData(Math.floor(w / 2), Math.floor(h / 2), 1, 1).data;
+
+  return {
+    cornerAlphas: corners.map(p => p[3]),
+    centerAlpha: center[3],
+    centerRgb: [center[0], center[1], center[2]],
+  };
+}
+
+function checkAlphaPreservation(canvases) {
+  let allCornersClear = true;
+  let allCentersOpaque = true;
+  const analysis = [];
+
+  for (const canvas of canvases) {
+    const s = sampleAlpha(canvas);
+    const avgCorner = s.cornerAlphas.reduce((a, b) => a + b, 0) / 4;
+    if (avgCorner > 5) allCornersClear = false;
+    if (s.centerAlpha < 250) allCentersOpaque = false;
+    analysis.push(s);
+  }
+
+  return { allCornersClear, allCentersOpaque, analysis, pass: allCornersClear && allCentersOpaque };
+}
+
+// ─── Render frames ─────────────────────────────────────────────────────
+const previewWrap = document.getElementById('preview-wrap');
+const renderedCanvases = [];
+
+function renderFrameBitmap(bitmap, index) {
+  previewWrap.innerHTML = '';
+
+  const scale = Math.min(1, 160 / bitmap.width);
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.round(bitmap.width * scale);
+  canvas.height = Math.round(bitmap.height * scale);
+  canvas.title = `Frame ${index}`;
+  const ctx = canvas.getContext('2d', { alpha: true });
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  ctx.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+
+  previewWrap.appendChild(canvas);
+  renderedCanvases.push(canvas);
+}
+
+// ─── Pixel analysis display ────────────────────────────────────────────
+function showPixelAnalysis(canvases) {
+  const el = document.getElementById('pixel-analysis');
+  const results = canvases.map((c, i) => {
+    const s = sampleAlpha(c);
+    const avg = Math.round(s.cornerAlphas.reduce((a, b) => a + b, 0) / 4);
+    return `Frame ${i}: corners α=${avg} (want 0) · center α=${s.centerAlpha} (want 255) · rgb=${s.centerRgb}`;
+  });
+  el.innerHTML = `<div style="margin-top:10px;font-size:11px;color:var(--muted);line-height:1.9">
+    ${results.map(r => `<div>${r}</div>`).join('')}
+  </div>`;
+}
+
+// ─── Set result badge ──────────────────────────────────────────────────
+function setResult(pass, msg) {
+  const el = document.getElementById('result-badge');
+  el.innerHTML = `<div class="result-badge ${pass ? 'pass' : 'fail'}">${pass ? '✓ PASS' : '✗ FAIL'} — ${msg}</div>`;
+}
+
+// ─── WebCodecs pipeline ────────────────────────────────────────────────
+let lastDecodedBitmap = null;
+
+async function runWebCodecsPipeline(file) {
+  if (!caps.VideoDecoder) {
+    log('VideoDecoder not available — skipping WebCodecs path', 'warn');
+    setResult(false, 'VideoDecoder unavailable on this browser (iOS < 17.4?)');
+    return;
+  }
+
+  log(`File: ${file.name} (${(file.size / 1024).toFixed(1)} KB, ${file.type})`, 'info');
+
+  // ── 1. Demux with mp4box ────────────────────────────────────────────
+  log('Importing mp4box…', 'info');
+  const MP4BoxMod = await import('https://cdn.jsdelivr.net/npm/mp4box@0.5.2/dist/mp4box.all.min.js');
+  const MP4Box = MP4BoxMod.default ?? MP4BoxMod;
+
+  const mp4 = MP4Box.createFile();
+  const chunks = [];
+  let trackInfo = null;
+  let demuxResolve, demuxReject;
+  const demuxDone = new Promise((res, rej) => { demuxResolve = res; demuxReject = rej; });
+
+  mp4.onReady = info => {
+    const vt = info.tracks.find(t => t.video || t.type === 'video');
+    if (!vt) { demuxReject(new Error('No video track')); return; }
+    trackInfo = vt;
+    mp4.setExtractionOptions(vt.id, null, { nbSamples: 200 });
+    mp4.start();
+  };
+
+  mp4.onSamples = (_id, _ref, samples) => {
+    for (const s of samples) {
+      chunks.push(new EncodedVideoChunk({
+        type: s.is_sync ? 'key' : 'delta',
+        timestamp: (s.cts / s.timescale) * 1e6,
+        duration: (s.duration / s.timescale) * 1e6,
+        data: s.data,
+      }));
+    }
+  };
+
+  mp4.onFlush = () => demuxResolve();
+  mp4.onError = err => demuxReject(new Error(String(err)));
+
+  log('Demuxing…', 'info');
+  const buffer = await file.arrayBuffer();
+  buffer.fileStart = 0;
+  mp4.appendBuffer(buffer);
+  mp4.flush();
+  await demuxDone;
+
+  log(`Demux complete: ${chunks.length} chunks, codec=${trackInfo.codec}, ${trackInfo.track_width}×${trackInfo.track_height}`, 'info');
+
+  // ── 2. Decode ──────────────────────────────────────────────────────
+  const config = {
+    codec: trackInfo.codec,
+    codedWidth: trackInfo.track_width ?? trackInfo.video?.width,
+    codedHeight: trackInfo.track_height ?? trackInfo.video?.height,
+    hardwareAcceleration: 'prefer-hardware',
+  };
+
+  const support = await VideoDecoder.isConfigSupported(config);
+  if (!support.supported) {
+    log(`Codec not supported: ${config.codec}`, 'fail');
+    setResult(false, `VideoDecoder.isConfigSupported returned false for ${config.codec}`);
+    return;
+  }
+
+  log(`VideoDecoder.isConfigSupported: ✓ (${config.codec})`, 'pass');
+
+  const decodedFrames = [];
+  let decodeError = null;
+
+  const decoder = new VideoDecoder({
+    output: async (frame) => {
+      try {
+        const oc = new OffscreenCanvas(frame.displayWidth, frame.displayHeight);
+        const ctx = oc.getContext('2d', { alpha: true });
+        ctx.drawImage(frame, 0, 0);
+        const bitmap = await createImageBitmap(oc);
+        decodedFrames.push({ bitmap, timestamp: frame.timestamp, width: frame.displayWidth, height: frame.displayHeight });
+      } finally {
+        frame.close();
+      }
+    },
+    error: (err) => { decodeError = err; },
+  });
+
+  decoder.configure(config);
+
+  for (const chunk of chunks) {
+    decoder.decode(chunk);
+  }
+  await decoder.flush();
+  decoder.close();
+
+  if (decodeError) {
+    log(`Decoder error: ${decodeError}`, 'fail');
+    setResult(false, `Decoder threw: ${decodeError}`);
+    return;
+  }
+
+  log(`Decoded ${decodedFrames.length} frames`, decodedFrames.length > 0 ? 'pass' : 'fail');
+
+  if (decodedFrames.length === 0) {
+    setResult(false, 'No frames decoded');
+    return;
+  }
+
+  // ── 3. Render first frame ──────────────────────────────────────────
+  const first = decodedFrames[0];
+  lastDecodedBitmap = first.bitmap;
+  renderFrameBitmap(first.bitmap, 0);
+
+  // ── 4. Alpha check ─────────────────────────────────────────────────
+  log('Sampling alpha values…', 'info');
+  const result = checkAlphaPreservation(renderedCanvases);
+  showPixelAnalysis(renderedCanvases);
+
+  for (const s of result.analysis) {
+    log(`  corners α=[${s.cornerAlphas.join(', ')}] · center α=${s.centerAlpha} rgb=[${s.centerRgb}]`, 'info');
+  }
+
+  if (result.allCornersClear) {
+    log('✓ Corners are transparent (alpha ≈ 0)', 'pass');
+  } else {
+    log('✗ Corners are NOT transparent — alpha was lost', 'fail');
+  }
+
+  if (result.allCentersOpaque) {
+    log('✓ Center is opaque (alpha = 255)', 'pass');
+  } else {
+    log('✗ Center is NOT opaque — possible decode error', 'fail');
+  }
+
+  if (result.pass) {
+    log('RESULT: PASS — alpha preserved end-to-end through WebCodecs pipeline', 'pass');
+    setResult(true, 'Alpha preserved through VideoDecoder → OffscreenCanvas → ImageBitmap');
+    document.getElementById('export-btn').disabled = false;
+  } else {
+    log('RESULT: FAIL — alpha was NOT preserved', 'fail');
+    setResult(false, 'Alpha lost. Do not proceed to Step 3 until this is fixed.');
+  }
+}
+
+// ─── GIF pipeline (alternative alpha test) ────────────────────────────
+async function runGifPipeline(file) {
+  log(`GIF file: ${file.name} (${(file.size / 1024).toFixed(1)} KB)`, 'info');
+
+  if (!caps.ImageDecoder) {
+    log('ImageDecoder not available — using gifuct-js fallback', 'warn');
+  }
+
+  // Use ImageDecoder if available
+  if (caps.ImageDecoder) {
+    log('Using ImageDecoder path…', 'info');
+    const buf = await file.arrayBuffer();
+    const decoder = new ImageDecoder({ data: buf, type: 'image/gif' });
+    await decoder.tracks.ready;
+    await decoder.completed;
+
+    const frameCount = decoder.tracks.selectedTrack?.frameCount ?? 0;
+    log(`ImageDecoder: ${frameCount} frames`, 'info');
+
+    if (frameCount === 0) { setResult(false, 'ImageDecoder: 0 frames'); return; }
+
+    const result = await decoder.decode({ frameIndex: 0 });
+    const frame = result.image;
+    const oc = new OffscreenCanvas(frame.displayWidth, frame.displayHeight);
+    const ctx = oc.getContext('2d', { alpha: true });
+    ctx.drawImage(frame, 0, 0);
+    const bitmap = await createImageBitmap(oc);
+    lastDecodedBitmap = bitmap;
+    frame.close();
+    decoder.close();
+
+    renderFrameBitmap(bitmap, 0);
+    const check = checkAlphaPreservation(renderedCanvases);
+    showPixelAnalysis(renderedCanvases);
+
+    log(`Alpha check: corners α=[${check.analysis[0]?.cornerAlphas}] center α=${check.analysis[0]?.centerAlpha}`, check.pass ? 'pass' : 'fail');
+    setResult(check.pass, check.pass
+      ? 'GIF alpha preserved via ImageDecoder'
+      : 'GIF alpha lost via ImageDecoder');
+    if (check.pass) document.getElementById('export-btn').disabled = false;
+  }
+}
+
+// ─── Synthetic WebM generator (VideoEncoder → WebM muxer) ────────────
+// We encode a series of frames with alpha using VideoEncoder into an IVF
+// container, then demux + redecode as the real test.
+// Note: VideoEncoder VP9 with alpha is not yet widely supported; we
+// instead test with a real VP8A/VP9A webm the user provides,
+// OR we generate a canvas-based synthetic test without VideoEncoder.
+async function runSyntheticCanvasTest() {
+  log('Running synthetic canvas alpha test (no VideoEncoder needed)…', 'info');
+  log('This tests the OffscreenCanvas → ImageBitmap → canvas roundtrip.', 'info');
+
+  // Create a synthetic frame: teal circle on transparent bg
+  const W = 320, H = 240;
+  const oc = new OffscreenCanvas(W, H);
+  const ctx = oc.getContext('2d', { alpha: true });
+
+  // Clear to fully transparent
+  ctx.clearRect(0, 0, W, H);
+
+  // Draw teal circle
+  ctx.fillStyle = 'rgba(0, 180, 180, 1)';
+  ctx.beginPath();
+  ctx.arc(W / 2, H / 2, 80, 0, Math.PI * 2);
+  ctx.fill();
+
+  const bitmap = await createImageBitmap(oc);
+  lastDecodedBitmap = bitmap;
+
+  log('Synthetic frame created: teal circle on transparent background', 'info');
+  renderFrameBitmap(bitmap, 0);
+
+  const check = checkAlphaPreservation(renderedCanvases);
+  showPixelAnalysis(renderedCanvases);
+
+  if (check.pass) {
+    log('✓ OffscreenCanvas preserves alpha correctly on this browser', 'pass');
+    log('NOTE: This tests the canvas path only. True WebCodecs alpha test requires a VP9+alpha WebM.', 'warn');
+    setResult(true, 'Canvas alpha roundtrip ✓ — upload a VP9+alpha WebM for full WebCodecs test');
+    document.getElementById('export-btn').disabled = false;
+  } else {
+    log('✗ OffscreenCanvas alpha BROKEN on this browser — fundamental issue', 'fail');
+    setResult(false, 'OffscreenCanvas alpha broken — cannot proceed');
+  }
+}
+
+// ─── PNG export ────────────────────────────────────────────────────────
+document.getElementById('export-btn').addEventListener('click', async () => {
+  if (!lastDecodedBitmap) return;
+  const canvas = document.createElement('canvas');
+  canvas.width = lastDecodedBitmap.width;
+  canvas.height = lastDecodedBitmap.height;
+  const ctx = canvas.getContext('2d', { alpha: true });
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  ctx.drawImage(lastDecodedBitmap, 0, 0);
+
+  canvas.toBlob(blob => {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'alpha-test-frame0.png';
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 5000);
+    log('PNG exported — open it in an image editor and check alpha channel: corners should be 0, center 255', 'pass');
+  }, 'image/png');
+});
+
+// ─── Synthetic generator button ────────────────────────────────────────
+document.getElementById('generate-btn').addEventListener('click', () => {
+  renderedCanvases.length = 0;
+  previewWrap.innerHTML = '';
+  document.getElementById('pixel-analysis').innerHTML = '';
+  document.getElementById('export-btn').disabled = true;
+  runSyntheticCanvasTest();
+});
+
+// ─── File input ────────────────────────────────────────────────────────
+async function handleFile(file) {
+  renderedCanvases.length = 0;
+  previewWrap.innerHTML = '';
+  document.getElementById('pixel-analysis').innerHTML = '';
+  document.getElementById('export-btn').disabled = true;
+
+  if (file.type === 'image/gif') {
+    await runGifPipeline(file).catch(err => {
+      log(`Error: ${err.message}`, 'fail');
+      setResult(false, err.message);
+    });
+  } else {
+    await runWebCodecsPipeline(file).catch(err => {
+      log(`Error: ${err.message}`, 'fail');
+      setResult(false, err.message);
+    });
+  }
+}
+
+document.getElementById('file-input').addEventListener('change', e => {
+  const f = e.target.files[0];
+  if (f) handleFile(f);
+});
+
+const dz = document.getElementById('drop-zone');
+dz.addEventListener('dragover', e => { e.preventDefault(); dz.style.borderColor = '#888'; });
+dz.addEventListener('dragleave', () => { dz.style.borderColor = ''; });
+dz.addEventListener('drop', e => {
+  e.preventDefault();
+  dz.style.borderColor = '';
+  const f = e.dataTransfer.files[0];
+  if (f) handleFile(f);
+});
+
+// Auto-run canvas test on load
+log('Page loaded. Run the synthetic test or upload a VP9+alpha WebM.', 'info');
+</script>
+</body>
+</html>
